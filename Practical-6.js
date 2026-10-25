@@ -1,19 +1,24 @@
 /**
  * ============================================================================
- * PRACTICAL 6: Build RESTful APIs for Student Records Management
- *              using Express.js and Postman testing.
+ * PRACTICAL 6: Create a backend server using Express.js implementing
+ *              routing, middleware and request handling.
  * ============================================================================
  * Concepts Demonstrated:
- *  1. REST Architectural Constraints (Stateless, Resource-based URIs, Uniform Interface)
- *  2. RESTful Resource Routing (/api/v1/students)
- *  3. Pagination, Filtering, and Query String Parsing
- *  4. Strict Request Body Validation (Email regex, CGPA boundaries, Roll No uniqueness)
- *  5. Aggregation / Analytical Endpoint for Student Statistics
- *  6. Postman Test Suite Ready (accompanied by Practical-6-Postman-Collection.json)
+ *  1. Express.js Application Server Setup & Configuration
+ *  2. Middleware (express.json, CORS, Custom Request Logger, Error Handler)
+ *  3. Modular Routing via express.Router()
+ *  4. Full CRUD Operations (Create, Read, Update, Delete) with HTTP Verbs:
+ *     - GET    /api/products       (Read all with query search & filter)
+ *     - GET    /api/products/:id   (Read single item by ID)
+ *     - POST   /api/products       (Create new item with validation)
+ *     - PUT    /api/products/:id   (Full update of an existing item)
+ *     - PATCH  /api/products/:id   (Partial update of specific fields)
+ *     - DELETE /api/products/:id   (Remove item by ID)
+ *  5. Proper HTTP Status Codes (200, 201, 400, 404, 500)
  * ============================================================================
  * How to Run:
  *   node Practical-6.js
- * Default Port: 5001 (Access at http://localhost:5001)
+ * Default Port: 5000 (Access at http://localhost:5000)
  * ============================================================================
  */
 
@@ -21,346 +26,306 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 
-// Middleware
+// -------------------------------------------------------------
+// 1. CORE MIDDLEWARE
+// -------------------------------------------------------------
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Custom Request Logger Middleware
 app.use((req, res, next) => {
-  console.log(`[REST API] ${req.method} ${req.url}`);
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
 // -------------------------------------------------------------
-// DATA STORE: Student Records Repository
+// 2. IN-MEMORY DATA STORE (Products Resource)
 // -------------------------------------------------------------
-let students = [
-  {
-    id: 1,
-    rollNo: '2024CS01',
-    name: 'Aarav Sharma',
-    email: 'aarav.sharma@gtu.edu',
-    department: 'Computer Science',
-    semester: 6,
-    cgpa: 8.85,
-    enrolledAt: '2024-01-15T00:00:00.000Z'
-  },
-  {
-    id: 2,
-    rollNo: '2024CS02',
-    name: 'Pooja Patel',
-    email: 'pooja.patel@gtu.edu',
-    department: 'Computer Science',
-    semester: 6,
-    cgpa: 9.35,
-    enrolledAt: '2024-01-16T00:00:00.000Z'
-  },
-  {
-    id: 3,
-    rollNo: '2024IT01',
-    name: 'Rohan Verma',
-    email: 'rohan.verma@gtu.edu',
-    department: 'Information Technology',
-    semester: 4,
-    cgpa: 7.9,
-    enrolledAt: '2024-02-01T00:00:00.000Z'
-  },
-  {
-    id: 4,
-    rollNo: '2024AI01',
-    name: 'Ananya Iyer',
-    email: 'ananya.iyer@gtu.edu',
-    department: 'Artificial Intelligence',
-    semester: 4,
-    cgpa: 9.1,
-    enrolledAt: '2024-02-10T00:00:00.000Z'
-  }
+let products = [
+  { id: 1, name: 'Mechanical Keyboard RGB', category: 'Electronics', price: 3499, inStock: true, stockQuantity: 25 },
+  { id: 2, name: 'Wireless Ergonomic Mouse', category: 'Electronics', price: 1899, inStock: true, stockQuantity: 40 },
+  { id: 3, name: 'Full HD IPS Monitor 24"', category: 'Displays', price: 8999, inStock: false, stockQuantity: 0 },
+  { id: 4, name: 'USB-C Fast Charging Hub', category: 'Accessories', price: 1299, inStock: true, stockQuantity: 50 }
 ];
 
-let nextStudentId = 5;
+let nextId = 5;
 
 // -------------------------------------------------------------
-// RESTFUL ROUTER: /api/v1/students
+// 3. EXPRESS ROUTER FOR CRUD OPERATIONS (/api/products)
 // -------------------------------------------------------------
-const router = express.Router();
+const productRouter = express.Router();
 
 /**
- * @route   GET /api/v1/students/stats/analytics
- * @desc    Statistical summary of student records (Average CGPA, Department Counts)
+ * @route   GET /api/products
+ * @desc    Get all products with optional query filtering (?category=... & search=...)
  */
-router.get('/stats/analytics', (req, res) => {
-  const totalStudents = students.length;
+productRouter.get('/', (req, res) => {
+  let result = [...products];
+  const { category, search } = req.query;
 
-  if (totalStudents === 0) {
-    return res.status(200).json({
-      success: true,
-      message: 'No student data available.',
-      data: { totalStudents: 0, averageCgpa: 0, departmentBreakdown: {} }
-    });
-  }
-
-  const totalCgpa = students.reduce((acc, s) => acc + s.cgpa, 0);
-  const avgCgpa = (totalCgpa / totalStudents).toFixed(2);
-
-  const departmentBreakdown = students.reduce((acc, s) => {
-    acc[s.department] = (acc[s.department] || 0) + 1;
-    return acc;
-  }, {});
-
-  return res.status(200).json({
-    success: true,
-    data: {
-      totalStudents,
-      averageCgpa: Number(avgCgpa),
-      departmentBreakdown
-    }
-  });
-});
-
-/**
- * @route   GET /api/v1/students
- * @desc    Get all students with query filters (department, minCgpa, search, pagination)
- */
-router.get('/', (req, res) => {
-  let filtered = [...students];
-  const { department, minCgpa, search, page = 1, limit = 10 } = req.query;
-
-  // Department Filter
-  if (department) {
-    filtered = filtered.filter(
-      (s) => s.department.toLowerCase() === department.toLowerCase()
+  // Filter by category
+  if (category) {
+    result = result.filter(
+      (p) => p.category.toLowerCase() === category.toLowerCase()
     );
   }
 
-  // Minimum CGPA Filter
-  if (minCgpa) {
-    const minVal = parseFloat(minCgpa);
-    if (!isNaN(minVal)) {
-      filtered = filtered.filter((s) => s.cgpa >= minVal);
-    }
-  }
-
-  // Search Filter (by Name or Roll Number)
+  // Search by name
   if (search) {
-    const q = search.toLowerCase();
-    filtered = filtered.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.rollNo.toLowerCase().includes(q)
+    result = result.filter((p) =>
+      p.name.toLowerCase().includes(search.toLowerCase())
     );
   }
 
-  // Pagination
-  const pageNum = parseInt(page, 10) || 1;
-  const limitNum = parseInt(limit, 10) || 10;
-  const startIndex = (pageNum - 1) * limitNum;
-  const paginatedData = filtered.slice(startIndex, startIndex + limitNum);
-
   return res.status(200).json({
     success: true,
-    count: paginatedData.length,
-    totalRecords: filtered.length,
-    page: pageNum,
-    totalPages: Math.ceil(filtered.length / limitNum),
-    data: paginatedData
+    count: result.length,
+    data: result
   });
 });
 
 /**
- * @route   GET /api/v1/students/:id
- * @desc    Get single student by numeric ID
+ * @route   GET /api/products/:id
+ * @desc    Get a single product by numeric ID
  */
-router.get('/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const student = students.find((s) => s.id === id);
+productRouter.get('/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
 
-  if (!student) {
+  if (isNaN(productId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid product ID. ID must be an integer.'
+    });
+  }
+
+  const product = products.find((p) => p.id === productId);
+
+  if (!product) {
     return res.status(404).json({
       success: false,
-      message: `Student with ID ${id} not found.`
+      message: `Product with ID ${productId} not found.`
     });
   }
 
   return res.status(200).json({
     success: true,
-    data: student
+    data: product
   });
 });
 
 /**
- * @route   GET /api/v1/students/roll/:rollNo
- * @desc    Search student by Roll Number
+ * @route   POST /api/products
+ * @desc    Create a new product record
  */
-router.get('/roll/:rollNo', (req, res) => {
-  const rollNo = req.params.rollNo.trim().toUpperCase();
-  const student = students.find((s) => s.rollNo.toUpperCase() === rollNo);
+productRouter.post('/', (req, res) => {
+  const { name, category, price, stockQuantity } = req.body;
 
-  if (!student) {
-    return res.status(404).json({
-      success: false,
-      message: `Student with Roll Number ${rollNo} not found.`
-    });
-  }
-
-  return res.status(200).json({
-    success: true,
-    data: student
-  });
-});
-
-/**
- * @route   POST /api/v1/students
- * @desc    Create new student record with validation
- */
-router.post('/', (req, res) => {
-  const { rollNo, name, email, department, semester, cgpa } = req.body;
-
-  // Validation
-  if (!rollNo || !name || !email || !department) {
+  // Input Validation
+  if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({
       success: false,
-      message: 'Missing required fields: rollNo, name, email, department are mandatory.'
+      message: 'Product "name" is required and must be a valid non-empty string.'
     });
   }
 
-  // Roll Number Uniqueness
-  const duplicateRoll = students.some(
-    (s) => s.rollNo.toUpperCase() === rollNo.trim().toUpperCase()
-  );
-  if (duplicateRoll) {
-    return res.status(409).json({
-      success: false,
-      message: `Conflict: Student with roll number "${rollNo}" already exists.`
-    });
-  }
-
-  // Email validation regex
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
+  if (price === undefined || typeof price !== 'number' || price < 0) {
     return res.status(400).json({
       success: false,
-      message: 'Invalid email address format.'
+      message: 'Product "price" is required and must be a non-negative number.'
     });
   }
 
-  // CGPA validation
-  const cgpaNum = parseFloat(cgpa);
-  if (isNaN(cgpaNum) || cgpaNum < 0 || cgpaNum > 10) {
-    return res.status(400).json({
-      success: false,
-      message: 'CGPA must be a number between 0.0 and 10.0.'
-    });
-  }
-
-  const newStudent = {
-    id: nextStudentId++,
-    rollNo: rollNo.trim().toUpperCase(),
+  const newProduct = {
+    id: nextId++,
     name: name.trim(),
-    email: email.trim().toLowerCase(),
-    department: department.trim(),
-    semester: parseInt(semester, 10) || 1,
-    cgpa: Number(cgpaNum.toFixed(2)),
-    enrolledAt: new Date().toISOString()
+    category: category ? category.trim() : 'General',
+    price: Number(price),
+    inStock: stockQuantity !== undefined ? Number(stockQuantity) > 0 : true,
+    stockQuantity: stockQuantity !== undefined ? Number(stockQuantity) : 10
   };
 
-  students.push(newStudent);
+  products.push(newProduct);
 
   return res.status(201).json({
     success: true,
-    message: 'Student record registered successfully.',
-    data: newStudent
+    message: 'Product created successfully.',
+    data: newProduct
   });
 });
 
 /**
- * @route   PUT /api/v1/students/:id
- * @desc    Update student record
+ * @route   PUT /api/products/:id
+ * @desc    Full update of an existing product record
  */
-router.put('/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const studentIndex = students.findIndex((s) => s.id === id);
+productRouter.put('/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const { name, category, price, inStock, stockQuantity } = req.body;
 
-  if (studentIndex === -1) {
+  const productIndex = products.findIndex((p) => p.id === productId);
+
+  if (productIndex === -1) {
     return res.status(404).json({
       success: false,
-      message: `Cannot update: Student with ID ${id} not found.`
+      message: `Cannot update. Product with ID ${productId} does not exist.`
     });
   }
 
-  const existing = students[studentIndex];
-  const { name, email, department, semester, cgpa } = req.body;
+  // Validate required fields for full PUT replacement
+  if (!name || price === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: 'Full update requires both "name" and "price" fields.'
+    });
+  }
 
-  if (name) existing.name = name.trim();
-  if (email) existing.email = email.trim().toLowerCase();
-  if (department) existing.department = department.trim();
-  if (semester) existing.semester = parseInt(semester, 10);
-  if (cgpa !== undefined) existing.cgpa = Number(parseFloat(cgpa).toFixed(2));
+  products[productIndex] = {
+    id: productId,
+    name: name.trim(),
+    category: category || products[productIndex].category,
+    price: Number(price),
+    inStock: inStock !== undefined ? Boolean(inStock) : Number(stockQuantity) > 0,
+    stockQuantity: stockQuantity !== undefined ? Number(stockQuantity) : 0
+  };
 
   return res.status(200).json({
     success: true,
-    message: `Student ID ${id} record updated successfully.`,
+    message: `Product ID ${productId} updated successfully.`,
+    data: products[productIndex]
+  });
+});
+
+/**
+ * @route   PATCH /api/products/:id
+ * @desc    Partial update of specific fields
+ */
+productRouter.patch('/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const productIndex = products.findIndex((p) => p.id === productId);
+
+  if (productIndex === -1) {
+    return res.status(404).json({
+      success: false,
+      message: `Cannot patch. Product with ID ${productId} does not exist.`
+    });
+  }
+
+  const existing = products[productIndex];
+  const { name, category, price, inStock, stockQuantity } = req.body;
+
+  if (name !== undefined) existing.name = name.trim();
+  if (category !== undefined) existing.category = category.trim();
+  if (price !== undefined) existing.price = Number(price);
+  if (stockQuantity !== undefined) {
+    existing.stockQuantity = Number(stockQuantity);
+    existing.inStock = Number(stockQuantity) > 0;
+  }
+  if (inStock !== undefined) existing.inStock = Boolean(inStock);
+
+  return res.status(200).json({
+    success: true,
+    message: `Product ID ${productId} partially updated.`,
     data: existing
   });
 });
 
 /**
- * @route   DELETE /api/v1/students/:id
- * @desc    Delete a student record
+ * @route   DELETE /api/products/:id
+ * @desc    Delete a product by ID
  */
-router.delete('/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const studentIndex = students.findIndex((s) => s.id === id);
+productRouter.delete('/:id', (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const productIndex = products.findIndex((p) => p.id === productId);
 
-  if (studentIndex === -1) {
+  if (productIndex === -1) {
     return res.status(404).json({
       success: false,
-      message: `Cannot delete: Student with ID ${id} not found.`
+      message: `Cannot delete. Product with ID ${productId} not found.`
     });
   }
 
-  const deletedStudent = students.splice(studentIndex, 1)[0];
+  const deletedProduct = products.splice(productIndex, 1)[0];
 
   return res.status(200).json({
     success: true,
-    message: `Student "${deletedStudent.name}" removed successfully.`,
-    deletedStudent
+    message: `Product "${deletedProduct.name}" (ID ${productId}) successfully removed.`,
+    deletedProduct
   });
 });
 
-// Mount Routes
-app.use('/api/v1/students', router);
+// Mount the Router
+app.use('/api/products', productRouter);
 
-// Root Documentation Route
+// -------------------------------------------------------------
+// 4. ROOT DASHBOARD & DOCUMENTATION ROUTE
+// -------------------------------------------------------------
 app.get('/', (req, res) => {
-  res.json({
-    api: 'Student Records Management RESTful API',
-    version: '1.0.0',
-    practical: 'Practical 6',
-    endpoints: {
-      getAllStudents: 'GET /api/v1/students',
-      getSingleStudent: 'GET /api/v1/students/:id',
-      searchByRollNo: 'GET /api/v1/students/roll/:rollNo',
-      createStudent: 'POST /api/v1/students',
-      updateStudent: 'PUT /api/v1/students/:id',
-      deleteStudent: 'DELETE /api/v1/students/:id',
-      analyticsStats: 'GET /api/v1/students/stats/analytics'
-    },
-    postmanCollection: 'Practical-6-Postman-Collection.json included in directory'
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Practical 6 - Express.js Routing & Middleware Server</title>
+        <style>
+          body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; line-height: 1.6; }
+          .container { max-width: 800px; margin: 0 auto; background: #1e293b; padding: 32px; border-radius: 12px; border: 1px solid #334155; }
+          h1 { color: #38bdf8; margin-bottom: 8px; }
+          .endpoint { background: #0f172a; padding: 12px; border-radius: 6px; margin: 10px 0; font-family: monospace; }
+          .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-weight: bold; margin-right: 8px; }
+          .get { background: #0284c7; color: white; }
+          .post { background: #16a34a; color: white; }
+          .put { background: #ea580c; color: white; }
+          .patch { background: #ca8a04; color: white; }
+          .delete { background: #dc2626; color: white; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Express.js Routing, Middleware & Request Handling</h1>
+          <p>Practical 6 Backend Server is Running on port <strong>${PORT}</strong>.</p>
+          <hr style="border: 1px solid #334155; margin: 20px 0;" />
+          <h3>Available API Endpoints:</h3>
+          <div class="endpoint"><span class="badge get">GET</span> <a href="/api/products" style="color: #38bdf8;">/api/products</a> - Get all products</div>
+          <div class="endpoint"><span class="badge get">GET</span> /api/products/:id - Get single product</div>
+          <div class="endpoint"><span class="badge post">POST</span> /api/products - Create new product (JSON body)</div>
+          <div class="endpoint"><span class="badge put">PUT</span> /api/products/:id - Full update of product</div>
+          <div class="endpoint"><span class="badge patch">PATCH</span> /api/products/:id - Partial update of product</div>
+          <div class="endpoint"><span class="badge delete">DELETE</span> /api/products/:id - Remove product</div>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+// -------------------------------------------------------------
+// 5. GLOBAL 404 & ERROR HANDLING MIDDLEWARE
+// -------------------------------------------------------------
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Cannot ${req.method} ${req.originalUrl}. Route not found.`
   });
 });
 
-// 404 Route
-app.use((req, res) => {
-  res.status(404).json({ success: false, message: 'REST Resource not found' });
+app.use((err, req, res, next) => {
+  console.error('Server Error:', err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Internal Server Error',
+    error: err.message
+  });
 });
 
-// Start Server
+// -------------------------------------------------------------
+// 6. SERVER STARTUP
+// -------------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`🎓 Practical 6 Student REST API Server Running!`);
+  console.log(`🚀 Practical 6 Express Routing & Middleware Server Running!`);
   console.log(`📍 URL: http://localhost:${PORT}`);
-  console.log(`📡 Endpoints: http://localhost:${PORT}/api/v1/students`);
-  console.log(`📮 Postman Ready!`);
+  console.log(`📡 Products API: http://localhost:${PORT}/api/products`);
   console.log(`=======================================================`);
 });
 

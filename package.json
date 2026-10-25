@@ -1,12 +1,16 @@
 {
   "name": "master-practicals",
   "version": "1.0.0",
-  "description": "Full Stack Web Development Practicals (React.js, Express.js, MongoDB Atlas)",
-  "main": "Practical-5.js",
+  "description": "Full Stack Web Development Practicals (React.js, Express.js, MongoDB Atlas, Socket.IO)",
+  "main": "Practical-6.js",
   "scripts": {
-    "start:p5": "node Practical-5.js",
     "start:p6": "node Practical-6.js",
-    "start:p7": "node Practical-7.js"
+    "start:p7": "node Practical-7.js",
+    "start:p8": "node Practical-8.js",
+    "start:p9": "node Practical-9.js",
+    "start:p10": "node Practical-10.js",
+    "start:p11": "node Practical-11.js",
+    "start:p12": "node Practical-12.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
